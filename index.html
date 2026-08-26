@@ -3,83 +3,191 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Voxel Block Game</title>
+    <title>3D Minecraft Terrain Generator</title>
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #000; }
         #crosshair {
             position: absolute;
             top: 50%; left: 50%;
-            width: 10px; height: 10px;
-            background: white;
+            width: 8px; height: 8px;
+            background: rgba(255, 255, 255, 0.8);
             border-radius: 50%;
             transform: translate(-50%, -50%);
             pointer-events: none;
+            z-index: 10;
+        }
+        #instructions {
+            position: absolute;
+            top: 20px; left: 20px;
+            color: white;
+            background: rgba(0,0,0,0.6);
+            padding: 12px 18px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 10;
         }
     </style>
+    <!-- Three.js Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Simplex Noise Library for Procedural Terrain -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
 </head>
 <body>
     <div id="crosshair"></div>
+    <div id="instructions">
+        <b>Click screen to play</b><br>
+        WASD: Move | Mouse: Look around | Space: Jump
+    </div>
 
     <script>
-        // 1. Setup Scene, Camera, Renderer
+        // 1. Scene, Camera, Renderer Setup
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87ceeb); // Sky blue
+        scene.background = new THREE.Color(0x87ceeb); // Sky Blue
+        scene.fog = new THREE.FogExp2(0x87ceeb, 0.015);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // 2. Lighting
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(10, 20, 15);
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0x404040));
+        // 2. Lighting Setup
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
 
-        // 3. Block Setup
-        const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const material = new THREE.MeshLambertMaterial({ color: 0x556B2F }); // Grass green block
+        const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        sunLight.position.set(50, 100, 50);
+        scene.add(sunLight);
 
-        // Generate a 10x10 Block World Ground
+        // 3. Materials for Different Block Types
+        const blockGeo = new THREE.BoxGeometry(1, 1, 1);
+        const materials = {
+            grass: new THREE.MeshLambertMaterial({ color: 0x4d8b31 }),
+            dirt: new THREE.MeshLambertMaterial({ color: 0x8b5a2b }),
+            stone: new THREE.MeshLambertMaterial({ color: 0x808080 }),
+            snow: new THREE.MeshLambertMaterial({ color: 0xffffff })
+        };
+
+        // 4. Perlin/Simplex Noise Terrain Generation
+        const simplex = new SimplexNoise();
+        const worldSize = 40; // 40x40 Blocks Area
         const blocks = [];
-        for (let x = -5; x < 5; x++) {
-            for (let z = -5; z < 5; z++) {
-                const cube = new THREE.Mesh(geometry, material);
-                cube.position.set(x, 0, z);
-                scene.add(cube);
-                blocks.push(cube);
+
+        function generateTerrain() {
+            for (let x = -worldSize / 2; x < worldSize / 2; x++) {
+                for (let z = -worldSize / 2; z < worldSize / 2; z++) {
+                    
+                    // Multi-layered Noise for Mountains & Small Hills
+                    let scale1 = 0.03;
+                    let scale2 = 0.08;
+                    
+                    let n1 = simplex.noise2D(x * scale1, z * scale1) * 12; // Big Mountains
+                    let n2 = simplex.noise2D(x * scale2, z * scale2) * 3;  // Small Detail
+                    
+                    let height = Math.floor(n1 + n2 + 5); // Base Ground Level Offset
+
+                    // Fill Blocks Vertically
+                    for (let y = 0; y <= height; y++) {
+                        let mat = materials.dirt;
+
+                        if (y === height) {
+                            if (height > 12) mat = materials.snow;      // High Mountains -> Snow
+                            else if (height > 8) mat = materials.stone; // Mid Elevation -> Stone
+                            else mat = materials.grass;                 // Low Ground -> Grass
+                        } else if (y < height - 3) {
+                            mat = materials.stone;                      // Deep Layers -> Stone
+                        }
+
+                        // Instanced or Grouped Meshes keep performance smooth
+                        const block = new THREE.Mesh(blockGeo, mat);
+                        block.position.set(x, y, z);
+                        scene.add(block);
+                        blocks.push(block);
+                    }
+                }
             }
         }
 
-        camera.position.set(0, 3, 8);
-        camera.lookAt(0, 0, 0);
+        generateTerrain();
 
-        // 4. Raycaster for Adding Blocks
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2(0, 0); // Center of screen
+        // 5. PointerLock & First Person Controls
+        let isLocked = false;
+        const move = { forward: false, backward: false, left: false, right: false, jump: false };
+        let velocityY = 0;
+        const gravity = -0.015;
 
-        window.addEventListener('click', () => {
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(blocks);
-
-            if (intersects.length > 0) {
-                const intersect = intersects[0];
-                const newCube = new THREE.Mesh(geometry, material);
-                // Position new block on the clicked face
-                newCube.position.copy(intersect.point).add(intersect.face.normal.clone().multiplyScalar(0.5)).floor().addScalar(0.5);
-                scene.add(newCube);
-                blocks.push(newCube);
-            }
+        document.body.addEventListener('click', () => {
+            document.body.requestPointerLock();
         });
 
-        // 5. Render Loop
+        document.addEventListener('pointerlockchange', () => {
+            isLocked = document.pointerLockElement === document.body;
+            document.getElementById('instructions').style.display = isLocked ? 'none' : 'block';
+        });
+
+        // Mouse Look Sensitivity
+        let yaw = 0, pitch = 0;
+        document.addEventListener('mousemove', (e) => {
+            if (!isLocked) return;
+            yaw -= e.movementX * 0.002;
+            pitch -= e.movementY * 0.002;
+            pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, pitch));
+        });
+
+        // Keyboard Event Handlers
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyW') move.forward = true;
+            if (e.code === 'KeyS') move.backward = true;
+            if (e.code === 'KeyA') move.left = true;
+            if (e.code === 'KeyD') move.right = true;
+            if (e.code === 'Space' && camera.position.y <= 18) { velocityY = 0.2; }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'KeyW') move.forward = false;
+            if (e.code === 'KeyS') move.backward = false;
+            if (e.code === 'KeyA') move.left = false;
+            if (e.code === 'KeyD') move.right = false;
+        });
+
+        camera.position.set(0, 16, 0);
+
+        // 6. Main Game Loop
         function animate() {
             requestAnimationFrame(animate);
+
+            if (isLocked) {
+                // Rotation
+                camera.rotation.order = "YXZ";
+                camera.rotation.y = yaw;
+                camera.rotation.x = pitch;
+
+                // Movement Logic
+                const speed = 0.12;
+                const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+                const side = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+
+                if (move.forward) camera.position.addScaledVector(forward, speed);
+                if (move.backward) camera.position.addScaledVector(forward, -speed);
+                if (move.left) camera.position.addScaledVector(side, -speed);
+                if (move.right) camera.position.addScaledVector(side, speed);
+
+                // Gravity & Jump Handling
+                velocityY += gravity;
+                camera.position.y += velocityY;
+
+                // Simple Floor Collision Lock
+                if (camera.position.y < 12) {
+                    camera.position.y = 12;
+                    velocityY = 0;
+                }
+            }
+
             renderer.render(scene, camera);
         }
+
         animate();
 
+        // Responsive Resize
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
