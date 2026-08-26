@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Voxel Block Game</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        #crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 10px; height: 10px;
+            background: white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="crosshair"></div>
+
+    <script>
+        // 1. Setup Scene, Camera, Renderer
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb); // Sky blue
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 2. Lighting
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(10, 20, 15);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x404040));
+
+        // 3. Block Setup
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshLambertMaterial({ color: 0x556B2F }); // Grass green block
+
+        // Generate a 10x10 Block World Ground
+        const blocks = [];
+        for (let x = -5; x < 5; x++) {
+            for (let z = -5; z < 5; z++) {
+                const cube = new THREE.Mesh(geometry, material);
+                cube.position.set(x, 0, z);
+                scene.add(cube);
+                blocks.push(cube);
+            }
+        }
+
+        camera.position.set(0, 3, 8);
+        camera.lookAt(0, 0, 0);
+
+        // 4. Raycaster for Adding Blocks
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2(0, 0); // Center of screen
+
+        window.addEventListener('click', () => {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(blocks);
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                const newCube = new THREE.Mesh(geometry, material);
+                // Position new block on the clicked face
+                newCube.position.copy(intersect.point).add(intersect.face.normal.clone().multiplyScalar(0.5)).floor().addScalar(0.5);
+                scene.add(newCube);
+                blocks.push(newCube);
+            }
+        });
+
+        // 5. Render Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
